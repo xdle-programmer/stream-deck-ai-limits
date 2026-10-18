@@ -67,6 +67,8 @@ export class UsageCache {
 	private lastAttemptAt = 0;
 	private inFlight: Promise<UsageSnapshot> | null = null;
 	private rateLimitedUntil = 0;
+	private generation = 0;
+	private accountGeneration: number | undefined;
 
 	constructor(options: UsageCacheOptions) {
 		this.provider = options.provider;
@@ -79,6 +81,21 @@ export class UsageCache {
 	/** The last good snapshot, if any (without triggering a fetch). */
 	get lastSnapshot(): UsageSnapshot | null {
 		return this.last;
+	}
+
+	/** Drop account data when an explicit sign-in starts or finishes. */
+	clear(): void {
+		this.generation++;
+		this.last = null;
+		this.lastFetchedAt = 0;
+		this.lastAttemptAt = 0;
+		this.rateLimitedUntil = 0;
+		this.inFlight = null;
+	}
+
+	useAccountGeneration(generation: number): void {
+		if (this.accountGeneration !== undefined && this.accountGeneration !== generation) this.clear();
+		this.accountGeneration = generation;
 	}
 
 	async get(fetcher: SnapshotFetcher, options: GetOptions = {}): Promise<UsageSnapshot> {
@@ -109,23 +126,27 @@ export class UsageCache {
 			return this.inFlight;
 		}
 
-		this.inFlight = this.runFetch(fetcher);
+		const inFlight = this.runFetch(fetcher);
+		this.inFlight = inFlight;
 		try {
-			return await this.inFlight;
+			return await inFlight;
 		} finally {
-			this.inFlight = null;
+			if (this.inFlight === inFlight) this.inFlight = null;
 		}
 	}
 
 	private async runFetch(fetcher: SnapshotFetcher): Promise<UsageSnapshot> {
+		const generation = this.generation;
 		this.lastAttemptAt = this.now();
 		try {
 			const snapshot = await fetcher();
+			if (generation !== this.generation) return this.emptySnapshot("auth_required");
 			this.last = snapshot;
 			this.lastFetchedAt = this.now();
 			this.rateLimitedUntil = 0;
 			return snapshot;
 		} catch (err) {
+			if (generation !== this.generation) return this.emptySnapshot("auth_required");
 			if (isUsageError(err) && err.status === "rate_limited") {
 				// Back off before hitting the network again. Honor a *large* Retry-After, but never
 				// wait less than MIN_RATE_LIMIT_BACKOFF_MS: this endpoint can return Retry-After: 0

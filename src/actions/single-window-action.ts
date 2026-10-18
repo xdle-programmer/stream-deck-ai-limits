@@ -9,7 +9,9 @@ import type {
 
 import { getSharedCache } from "../cache/ttl-cache.ts";
 import { ClaudeProvider } from "../providers/claude/claude-provider.ts";
+import { managedClaudeSession } from "../providers/claude/claude-session.ts";
 import { CodexProvider } from "../providers/codex/codex-provider.ts";
+import { managedCodexSession } from "../providers/codex/codex-session.ts";
 import { CopilotProvider } from "../providers/copilot/copilot-provider.ts";
 import type { Provider, UsageSnapshot } from "../providers/types.ts";
 import { renderSingleWindowIcon } from "../render/single-window-icon.ts";
@@ -25,7 +27,7 @@ import {
 } from "../settings/usage-settings.ts";
 import { logger } from "../utils/logger.ts";
 
-/** Countdown redraw cadence (no network) so the "in 7h 58m" text ticks smoothly. */
+/** Minute-precision countdown redraw cadence (no network). */
 const COUNTDOWN_REDRAW_MS = 60_000;
 
 interface KeyRuntime {
@@ -39,16 +41,30 @@ interface KeyRuntime {
 	tickTimer: ReturnType<typeof setInterval>;
 	/** Last snapshot, reused by the countdown redraw without re-fetching. */
 	lastSnapshot: UsageSnapshot | null;
+	refreshSequence: number;
 }
 
 /**
- * Single-window usage action: shows ONE provider + ONE window (e.g. "Claude 5H") at a larger
- * size, with the reset date/time and/or countdown. Provider, window, layout and reset display
- * are all chosen in the Property Inspector.
+ * Universal usage action: one selected provider/window, its usage bar and a compact reset
+ * countdown. Provider and limit are chosen in the Property Inspector.
  */
 @action({ UUID: "com.singerous.ai-limits.usage-single" })
 export class SingleWindowAction extends SingletonAction<UsageActionSettings> {
 	private readonly instances = new Map<string, KeyRuntime>();
+
+	constructor() {
+		super();
+		const onAuthChange = (provider: "claude" | "codex") => {
+			for (const runtime of this.instances.values()) {
+				if (runtime.displayConfig.provider === provider && !runtime.usageConfig.customCredentialsPath) {
+					runtime.lastSnapshot = null;
+					void this.refresh(runtime, { force: false });
+				}
+			}
+		};
+		managedClaudeSession.onChange(() => onAuthChange("claude"));
+		managedCodexSession.onChange(() => onAuthChange("codex"));
+	}
 
 	override async onWillAppear(ev: WillAppearEvent<UsageActionSettings>): Promise<void> {
 		if (!ev.action.isKey()) {
@@ -107,7 +123,8 @@ export class SingleWindowAction extends SingletonAction<UsageActionSettings> {
 				displayConfig,
 				dataTimer: undefined as unknown as ReturnType<typeof setInterval>,
 				tickTimer: undefined as unknown as ReturnType<typeof setInterval>,
-				lastSnapshot: existing?.lastSnapshot ?? null,
+				lastSnapshot: null,
+				refreshSequence: 0,
 			};
 			this.instances.set(keyAction.id, runtime);
 			return runtime;
@@ -118,6 +135,7 @@ export class SingleWindowAction extends SingletonAction<UsageActionSettings> {
 	}
 
 	private startTimers(runtime: KeyRuntime): void {
+		if (this.instances.get(runtime.action.id) !== runtime) return;
 		clearInterval(runtime.dataTimer);
 		clearInterval(runtime.tickTimer);
 		runtime.dataTimer = setInterval(() => {
@@ -132,6 +150,7 @@ export class SingleWindowAction extends SingletonAction<UsageActionSettings> {
 	}
 
 	private async refresh(runtime: KeyRuntime, options: { force: boolean }): Promise<void> {
+		const sequence = ++runtime.refreshSequence;
 		let snapshot: UsageSnapshot;
 		try {
 			snapshot = await runtime.provider.getUsage({ force: options.force });
@@ -146,15 +165,15 @@ export class SingleWindowAction extends SingletonAction<UsageActionSettings> {
 				stale: false,
 			};
 		}
+		if (this.instances.get(runtime.action.id) !== runtime || sequence !== runtime.refreshSequence) return;
 		runtime.lastSnapshot = snapshot;
 		await this.draw(runtime, snapshot);
 	}
 
 	private async draw(runtime: KeyRuntime, snapshot: UsageSnapshot): Promise<void> {
+		if (this.instances.get(runtime.action.id) !== runtime) return;
 		const svg = renderSingleWindowIcon(snapshot, {
 			window: runtime.displayConfig.window,
-			resetDisplay: runtime.displayConfig.resetDisplay,
-			dateFormat: runtime.displayConfig.dateFormat,
 			providerAccent: runtime.displayConfig.providerAccent,
 		});
 		await runtime.action.setImage(toDataUrl(svg));

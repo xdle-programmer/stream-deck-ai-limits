@@ -1,190 +1,95 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-
 import { renderUsageIcon, toDataUrl } from "../src/render/usage-icon.ts";
 import type { UsageSnapshot, UsageStatus } from "../src/providers/types.ts";
 
+const NOW = new Date("2026-05-31T00:00:00Z");
 function snapshot(partial: Partial<UsageSnapshot> = {}): UsageSnapshot {
 	return {
-		provider: "claude",
-		session: { usedPercent: 73, resetAt: null },
-		weekly: { usedPercent: 44, resetAt: null },
-		status: "warning",
-		updatedAt: "2026-05-30T00:00:00.000Z",
-		stale: false,
-		...partial,
+		provider: "claude", session: { usedPercent: 73, resetAt: "2026-05-31T04:10:00Z" },
+		weekly: { usedPercent: 44, resetAt: "2026-06-03T05:00:00Z" },
+		status: "warning", updatedAt: NOW.toISOString(), stale: false, ...partial,
 	};
 }
 
-/** Extract all `fill="..."` accent-ish colors to compare visual states. */
-function fills(svg: string): string[] {
-	return [...svg.matchAll(/fill="(#[0-9a-fA-F]{6})"/g)].map((m) => m[1]);
+test("one selected 5-hour limit and countdown replace the two-window layout", () => {
+	const svg = renderUsageIcon(snapshot(), NOW, { window: "session" });
+	assert.match(svg, />Claude 5H</); assert.match(svg, />73%</); assert.match(svg, />04:10</);
+	assert.doesNotMatch(svg, /44%|7D/);
+	assert.equal((svg.match(/%<\/text>/g) ?? []).length, 1);
+	assert.equal((svg.match(/width="120" height="12"/g) ?? []).length, 1);
+});
+
+test("weekly selection shows days, hours and minutes of its own reset", () => {
+	const svg = renderUsageIcon(snapshot(), NOW, { window: "weekly" });
+	assert.match(svg, />Claude 7D</); assert.match(svg, />44%</); assert.match(svg, />3d 05:00</);
+	assert.doesNotMatch(svg, /73%|5H|04:10/);
+});
+
+test("selected limit color ignores a different exhausted window", () => {
+	const snap = snapshot({ session: { usedPercent: 5, resetAt: null }, weekly: { usedPercent: 100, resetAt: null }, status: "limited" });
+	const session = renderUsageIcon(snap, NOW, { window: "session" });
+	assert.match(session, /fill="#34c759">5%/); assert.doesNotMatch(session, /#ff453a|100%/);
+	const weekly = renderUsageIcon(snap, NOW, { window: "weekly" });
+	assert.match(weekly, /fill="#ff453a">100%/); assert.doesNotMatch(weekly, /#34c759/);
+});
+
+test("percentage rounding and custom status thresholds apply to the selected limit", () => {
+	const svg = renderUsageIcon(snapshot({ session: { usedPercent: 14.6, resetAt: null }, thresholds: { warning: 10, critical: 20 } }), NOW);
+	assert.match(svg, /fill="#ffd60a">15%/);
+});
+
+test("automatic selection displays a weekly-only Codex account without a fictitious 5H row", () => {
+	const svg = renderUsageIcon(snapshot({ provider: "codex", session: { usedPercent: null, resetAt: null } }), NOW);
+	assert.match(svg, />Codex 7D</); assert.match(svg, />44%</); assert.match(svg, />3d 05:00</);
+	assert.doesNotMatch(svg, /5H|No Data/);
+});
+
+test("explicitly unavailable limit shows No Data instead of a different limit", () => {
+	const svg = renderUsageIcon(snapshot({ session: { usedPercent: null, resetAt: null } }), NOW, { window: "session" });
+	assert.match(svg, /Claude 5H/); assert.match(svg, /No Data/); assert.doesNotMatch(svg, /44%/);
+});
+
+for (const status of ["ok", "warning", "critical", "limited", "stale", "auth_required", "rate_limited", "error"] as UsageStatus[]) {
+	test(`background is exactly black for ${status}`, () => {
+		const svg = renderUsageIcon(snapshot({ status }), NOW);
+		assert.match(svg, /<rect width="144" height="144" fill="#000000"/);
+		assert.doesNotMatch(svg, /#1c1c1e|#141414|#173d34|#46291f/);
+	});
 }
 
-const GREEN = "#34c759"; // ok
-const RED = "#ff453a"; // limited
-
-test("bars layout: shows both window percentages", () => {
-	const svg = renderUsageIcon(snapshot({ session: { usedPercent: 73, resetAt: null }, weekly: { usedPercent: 44, resetAt: null } }));
-	assert.match(svg, /<svg[\s\S]*<\/svg>/);
-	assert.match(svg, /73%/);
-	assert.match(svg, /44%/);
-	assert.match(svg, />5H</);
-	assert.match(svg, />W</);
+test("stale data retains the selected limit color and countdown with a subtle dot", () => {
+	const svg = renderUsageIcon(snapshot({ stale: true, status: "stale" }), NOW);
+	assert.match(svg, />73%</); assert.match(svg, />04:10</); assert.match(svg, /<circle/);
+	assert.doesNotMatch(svg, /44%|STALE/);
 });
 
-test("percentages are rounded to integers", () => {
-	const svg = renderUsageIcon(snapshot({ session: { usedPercent: 72.6, resetAt: null }, weekly: { usedPercent: 44.2, resetAt: null } }));
-	assert.match(svg, /73%/);
-	assert.match(svg, /44%/);
+for (const [status, message] of [["auth_required", "Login Required"], ["rate_limited", "Rate Limited"], ["error", "Error"]] as const) {
+	test(`${status} shows its message without usage bars`, () => {
+		const svg = renderUsageIcon(snapshot({ status }), NOW);
+		assert.ok(svg.includes(message)); assert.doesNotMatch(svg, /73%|04:10|height="12"/);
+	});
+}
+
+test("unknown reset shows a dash and expired reset shows 00:00", () => {
+	const missing = renderUsageIcon(snapshot({ session: { usedPercent: 5, resetAt: null } }), NOW);
+	assert.match(missing, />—</);
+	const expired = renderUsageIcon(snapshot(), new Date("2026-06-01T00:00:00Z"), { window: "session" });
+	assert.match(expired, />00:00</);
 });
 
-test("status bands produce distinct accent colors", () => {
-	const colors = new Set<string>();
-	for (const [pct, status] of [[10, "ok"], [75, "warning"], [95, "critical"], [100, "limited"]] as const) {
-		const svg = renderUsageIcon(snapshot({ session: { usedPercent: pct, resetAt: null }, weekly: { usedPercent: 0, resetAt: null }, status: status as UsageStatus }));
-		// the filled bar uses the accent; collect the non-background, non-track fills
-		fills(svg).forEach((c) => colors.add(c));
-	}
-	// ok/warning/critical/limited accents differ → at least 4 distinct accent colors present
-	assert.ok(colors.size >= 4, `expected >=4 distinct colors, got ${colors.size}: ${[...colors].join(",")}`);
+test("Copilot displays one monthly limit and the same minute-precision countdown", () => {
+	const svg = renderUsageIcon(snapshot({ provider: "copilot" }), NOW, { window: "weekly" });
+	assert.match(svg, />Copilot MO</); assert.match(svg, />73%</); assert.match(svg, />04:10</);
+	assert.doesNotMatch(svg, /7D|5H|44%/);
 });
 
-test("each bar is colored by its OWN percentage (not the worst overall)", () => {
-	// session low (ok→green), weekly maxed (limited→red). Both colors must appear.
-	const svg = renderUsageIcon(
-		snapshot({
-			session: { usedPercent: 5, resetAt: null },
-			weekly: { usedPercent: 100, resetAt: null },
-			status: "limited", // overall worst
-		}),
-	);
-	const present = fills(svg);
-	assert.ok(present.includes(GREEN), `expected a green (ok) bar for 5%, got: ${present.join(",")}`);
-	assert.ok(present.includes(RED), `expected a red (limited) bar for 100%, got: ${present.join(",")}`);
+test("unlimited Copilot plan has no fictitious percentage or countdown", () => {
+	const svg = renderUsageIcon(snapshot({ provider: "copilot", session: { usedPercent: null, resetAt: "2026-06-03T05:00:00Z" } }), NOW);
+	assert.match(svg, /No Data/); assert.doesNotMatch(svg, /44%|3d/);
 });
 
-test("per-bar colors respect custom thresholds carried on the snapshot", () => {
-	// With warning=10/critical=20, a 15% bar should be warning (yellow), a 5% bar ok (green).
-	const svg = renderUsageIcon(
-		snapshot({
-			session: { usedPercent: 5, resetAt: null },
-			weekly: { usedPercent: 15, resetAt: null },
-			status: "warning",
-			thresholds: { warning: 10, critical: 20 },
-		}),
-	);
-	const present = fills(svg);
-	assert.ok(present.includes(GREEN), "5% under custom warning=10 → green");
-	assert.ok(present.includes("#ffd60a"), "15% at custom warning=10 → yellow");
-});
-
-test("stale shows real per-bar colors (not dimmed) with only a subtle dot", () => {
-	const svg = renderUsageIcon(
-		snapshot({
-			session: { usedPercent: 5, resetAt: null },
-			weekly: { usedPercent: 100, resetAt: null },
-			status: "stale",
-			stale: true,
-			staleReason: "rate_limited",
-		}),
-	);
-	// Numbers stay, colored by their own percentage — looks like live data.
-	assert.match(svg, /5%/);
-	assert.match(svg, /100%/);
-	assert.ok(fills(svg).includes(GREEN), "5% bar still green when stale");
-	assert.ok(fills(svg).includes(RED), "100% bar still red when stale");
-	// A small dot hints staleness; no big alarming text.
-	assert.match(svg, /<circle/);
-	assert.doesNotMatch(svg, /RATE LIM/);
-	assert.doesNotMatch(svg, /STALE/);
-});
-
-test("auth_required renders a Login Required message, not bars", () => {
-	const svg = renderUsageIcon(snapshot({ status: "auth_required", session: { usedPercent: null, resetAt: null }, weekly: { usedPercent: null, resetAt: null } }));
-	assert.match(svg, /Login/);
-	assert.match(svg, /Required/);
-	assert.doesNotMatch(svg, /5H/);
-});
-
-test("rate_limited renders a Rate Limited message", () => {
-	const svg = renderUsageIcon(snapshot({ status: "rate_limited", session: { usedPercent: null, resetAt: null }, weekly: { usedPercent: null, resetAt: null } }));
-	assert.match(svg, /Rate/);
-	assert.match(svg, /Limited/);
-});
-
-test("error renders an Error message", () => {
-	const svg = renderUsageIcon(snapshot({ status: "error", session: { usedPercent: null, resetAt: null }, weekly: { usedPercent: null, resetAt: null } }));
-	assert.match(svg, /Error/);
-});
-
-test("stale keeps the numbers and adds only a subtle dot", () => {
-	const svg = renderUsageIcon(snapshot({ status: "stale", stale: true }));
-	assert.match(svg, /73%/);
-	assert.match(svg, /<circle/);
-	assert.doesNotMatch(svg, /STALE/);
-});
-
-test("missing values render an em dash instead of a percentage", () => {
-	const svg = renderUsageIcon(snapshot({ status: "ok", session: { usedPercent: 50, resetAt: null }, weekly: { usedPercent: null, resetAt: null } }));
-	assert.match(svg, /50%/);
-	assert.match(svg, /—/);
-});
-
-test("both windows null (non-error status) falls back to a No Data message", () => {
-	const svg = renderUsageIcon(snapshot({ status: "ok", session: { usedPercent: null, resetAt: null }, weekly: { usedPercent: null, resetAt: null } }));
-	assert.match(svg, /No/);
-	assert.match(svg, /Data/);
-});
-
-test("Copilot combined rendering shows monthly percentage and countdown", () => {
-	const svg = renderUsageIcon(snapshot({
-		provider: "copilot",
-		session: { usedPercent: 25, resetAt: "2026-09-01T00:00:00Z" },
-		weekly: { usedPercent: null, resetAt: null },
-	}), new Date("2026-08-29T00:00:00Z"));
-	assert.match(svg, /Copilot/);
-	assert.match(svg, /25%/);
-	assert.match(svg, /3d 0h left/);
-	assert.doesNotMatch(svg, />W</);
-});
-
-test("Copilot combined rendering shows no data for an unlimited plan without a countdown", () => {
-	const svg = renderUsageIcon(snapshot({ provider: "copilot", session: { usedPercent: null, resetAt: "2026-09-01T00:00:00Z" }, weekly: { usedPercent: null, resetAt: null } }));
-	assert.match(svg, /No/);
-	assert.match(svg, /Data/);
-	assert.doesNotMatch(svg, /left/);
-});
-
-test("toDataUrl produces a base64 svg data URL that round-trips", () => {
-	const svg = renderUsageIcon(snapshot());
-	const url = toDataUrl(svg);
-	assert.match(url, /^data:image\/svg\+xml;base64,/);
-	const decoded = Buffer.from(url.split(",")[1], "base64").toString("utf-8");
-	assert.equal(decoded, svg);
-});
-
-test("provider label: codex auth_required shows 'Codex', not 'Claude'", () => {
-	const svg = renderUsageIcon(
-		snapshot({
-			provider: "codex",
-			status: "auth_required",
-			session: { usedPercent: null, resetAt: null },
-			weekly: { usedPercent: null, resetAt: null },
-		}),
-	);
-	assert.match(svg, /Codex/);
-	assert.doesNotMatch(svg, /Claude/);
-});
-
-test("provider label: claude error shows 'Claude'", () => {
-	const svg = renderUsageIcon(
-		snapshot({
-			provider: "claude",
-			status: "error",
-			session: { usedPercent: null, resetAt: null },
-			weekly: { usedPercent: null, resetAt: null },
-		}),
-	);
-	assert.match(svg, /Claude/);
+test("SVG data URL round-trips", () => {
+	const svg = renderUsageIcon(snapshot(), NOW);
+	assert.equal(Buffer.from(toDataUrl(svg).split(",")[1], "base64").toString("utf-8"), svg);
 });

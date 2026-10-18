@@ -112,3 +112,11 @@ test("single-window: fable window falls back to weekly for Codex", () => {
 	assert.equal(r.provider, "codex");
 	assert.equal(r.window, "weekly");
 });
+
+test("all keys default to automatic window selection and migrate tinted backgrounds to a black layout", () => {
+	assert.equal(resolveSingleWindowSettings({ provider: "claude" }).window, "auto");
+	assert.equal(resolveSingleWindowSettings({ provider: "codex" }).window, "auto");
+	assert.equal(resolveSingleWindowSettings({ providerAccent: "tint" }).providerAccent, "none");
+	assert.equal(resolveSingleWindowSettings({ providerAccent: "frame" }).providerAccent, "none");
+	assert.equal(resolveSingleWindowSettings({ providerAccent: "none" }).providerAccent, "none");
+});

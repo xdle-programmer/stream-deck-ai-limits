@@ -1,13 +1,13 @@
 {
 	"Name": "Claude & Codex Usage",
-	"Version": "0.2.0.0",
+	"Version": "0.5.1.0",
 	"Author": "singerous",
 	"Actions": [
 		{
 			"Name": "Claude Usage",
 			"UUID": "com.singerous.ai-limits.claude-usage",
 			"Icon": "imgs/actions/claude/icon",
-			"Tooltip": "Show Claude Code 5-hour and weekly usage limits.",
+			"Tooltip": "Show one Claude Code usage limit and its reset countdown.",
 			"PropertyInspectorPath": "ui/claude.html",
 			"Controllers": [
 				"Keypad"
@@ -23,7 +23,7 @@
 			"Name": "Codex Usage",
 			"UUID": "com.singerous.ai-limits.codex-usage",
 			"Icon": "imgs/actions/codex/icon",
-			"Tooltip": "Show Codex CLI 5-hour and weekly usage limits.",
+			"Tooltip": "Show one available Codex usage limit and its reset countdown.",
 			"PropertyInspectorPath": "ui/codex.html",
 			"Controllers": [
 				"Keypad"

@@ -6,6 +6,9 @@ import { UsageCache } from "../src/cache/ttl-cache.ts";
 import { UnauthorizedError } from "../src/providers/claude/claude-api-client.ts";
 import { authRequired, genericError, rateLimited } from "../src/utils/errors.ts";
 import type { ClaudeCredentials } from "../src/providers/claude/claude-credentials.ts";
+import { ManagedClaudeSession } from "../src/providers/claude/claude-session.ts";
+import type { ClaudeProfileRecord } from "../src/providers/claude/claude-profile.ts";
+import type { RefreshedTokens } from "../src/providers/claude/claude-oauth.ts";
 
 const FRESH_CREDS: ClaudeCredentials = {
 	accessToken: "ACCESS_FRESH",
@@ -15,10 +18,25 @@ const FRESH_CREDS: ClaudeCredentials = {
 
 const RAW = { five_hour: { utilization: 80, resets_at: "2026-05-30T15:00:00Z" }, seven_day: { utilization: 40, resets_at: "2026-06-02T00:00:00Z" } };
 
-function makeProvider(deps: Partial<ClaudeProviderDeps>, cacheOpts?: { forceMinIntervalMs?: number }): ClaudeProvider {
+type TestDeps = Partial<ClaudeProviderDeps> & {
+	readCredentials: () => Promise<ClaudeCredentials>;
+	refreshToken?: () => Promise<Partial<RefreshedTokens> & { accessToken: string }>;
+};
+
+function makeProvider(deps: TestDeps, cacheOpts?: { forceMinIntervalMs?: number }): ClaudeProvider {
+	let saved: ClaudeProfileRecord | undefined;
+	const session = new ManagedClaudeSession({
+		read: async () => saved ?? { document: { claudeAiOauth: { ...await deps.readCredentials() } }, source: "file" },
+		write: async (record) => { saved = structuredClone(record); },
+		withLock: async (run) => run(),
+	}, async () => ({
+		refreshToken: "ROTATED_REFRESH", expiresAt: Date.now() + 3_600_000,
+		...await deps.refreshToken!(),
+	}));
 	return new ClaudeProvider({
 		cache: new UsageCache({ provider: "claude", ...cacheOpts }),
 		deps,
+		session,
 	});
 }
 

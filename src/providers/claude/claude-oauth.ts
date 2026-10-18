@@ -1,4 +1,5 @@
-import { authRequired, genericError } from "../../utils/errors.ts";
+import { authRequired, genericError, rateLimited } from "../../utils/errors.ts";
+import { parseRetryAfterMs } from "../../utils/http.ts";
 
 /**
  * Public OAuth client id used by the official Claude Code CLI. This is not a secret — it is
@@ -12,8 +13,7 @@ const TOKEN_ENDPOINT = "https://platform.claude.com/v1/oauth/token";
 const REFRESH_TIMEOUT_MS = 8_000;
 
 /**
- * Result of a successful refresh. Tokens are returned to the caller to hold **in memory only**
- * — this plugin does not rewrite the user's `.credentials.json` (see plan decision #1).
+ * Full refresh result, persisted by the session manager only in the plugin-owned profile.
  */
 export interface RefreshedTokens {
 	accessToken: string;
@@ -21,12 +21,16 @@ export interface RefreshedTokens {
 	refreshToken: string | null;
 	/** New expiry as epoch milliseconds, if derivable from `expires_in`; otherwise `null`. */
 	expiresAt: number | null;
+	refreshTokenExpiresAt?: number;
+	scopes?: string[];
 }
 
 interface TokenResponse {
 	access_token?: unknown;
 	refresh_token?: unknown;
 	expires_in?: unknown;
+	refresh_token_expires_in?: unknown;
+	scope?: unknown;
 }
 
 /**
@@ -36,7 +40,7 @@ interface TokenResponse {
  *   re-login via Claude Code), or `error` on network/timeout/unexpected-response. Messages and
  *   logs never include token material.
  */
-export async function refreshClaudeToken(refreshToken: string | null): Promise<RefreshedTokens> {
+export async function refreshClaudeToken(refreshToken: string | null, clientId = CLAUDE_CODE_CLIENT_ID): Promise<RefreshedTokens> {
 	if (!refreshToken) {
 		throw authRequired("No refresh token available. Log in with Claude Code again.");
 	}
@@ -52,7 +56,7 @@ export async function refreshClaudeToken(refreshToken: string | null): Promise<R
 			body: JSON.stringify({
 				grant_type: "refresh_token",
 				refresh_token: refreshToken,
-				client_id: CLAUDE_CODE_CLIENT_ID,
+				client_id: clientId,
 			}),
 			signal: controller.signal,
 		});
@@ -63,9 +67,20 @@ export async function refreshClaudeToken(refreshToken: string | null): Promise<R
 		clearTimeout(timer);
 	}
 
+	if (response.status === 429) {
+		throw rateLimited("Claude token refresh was rate limited.", parseRetryAfterMs(response.headers.get("retry-after")));
+	}
 	if (response.status === 400 || response.status === 401 || response.status === 403) {
-		// Refresh token is invalid/expired/revoked — user must re-authenticate.
-		throw authRequired("Claude session expired. Log in with Claude Code again.");
+		let code: unknown;
+		try {
+			const error = await response.json() as { error?: string | { type?: string } };
+			code = typeof error?.error === "string" ? error.error : error?.error?.type;
+		} catch {}
+		if (code === "invalid_grant") {
+			throw authRequired("Claude's plugin login expired or was revoked. Reconnect Claude in the key's settings.");
+		}
+		// A forbidden request or invalid OAuth client is not evidence that credentials expired.
+		throw genericError(`Claude token refresh was rejected (HTTP ${response.status}).`);
 	}
 	if (!response.ok) {
 		throw genericError(`Token refresh failed (HTTP ${response.status}).`);
@@ -78,15 +93,18 @@ export async function refreshClaudeToken(refreshToken: string | null): Promise<R
 		throw genericError("Token refresh returned an unexpected response.");
 	}
 
-	const accessToken = typeof body.access_token === "string" ? body.access_token : "";
+	const accessToken = typeof body?.access_token === "string" ? body.access_token : "";
 	if (!accessToken) {
 		throw genericError("Token refresh response had no access token.");
 	}
 
-	const expiresInSec = typeof body.expires_in === "number" ? body.expires_in : null;
+	const expiresInSec = typeof body.expires_in === "number" && Number.isFinite(body.expires_in) && body.expires_in >= 0 ? body.expires_in : null;
+	const refreshExpiresIn = typeof body.refresh_token_expires_in === "number" && Number.isFinite(body.refresh_token_expires_in) && body.refresh_token_expires_in >= 0 ? body.refresh_token_expires_in : null;
 	return {
 		accessToken,
-		refreshToken: typeof body.refresh_token === "string" ? body.refresh_token : null,
+		refreshToken: typeof body.refresh_token === "string" && body.refresh_token ? body.refresh_token : null,
 		expiresAt: expiresInSec !== null ? Date.now() + expiresInSec * 1000 : null,
+		...(refreshExpiresIn !== null ? { refreshTokenExpiresAt: Date.now() + refreshExpiresIn * 1000 } : {}),
+		...(typeof body.scope === "string" ? { scopes: body.scope.split(" ").filter(Boolean) } : {}),
 	};
 }

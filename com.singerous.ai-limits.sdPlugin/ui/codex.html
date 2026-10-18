@@ -3,6 +3,7 @@
 	<head lang="en">
 		<meta charset="utf-8" />
 		<title>Codex Usage Settings</title>
+		<link rel="stylesheet" href="claude-auth.css" />
 		<script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
 	</head>
 	<body>
@@ -10,6 +11,20 @@
 			Settings auto-persist to the action via the `setting` attribute and apply live in the
 			plugin (onDidReceiveSettings). Components: https://sdpi-components.dev/docs/components
 		-->
+		<div id="codex-auth">
+			<sdpi-item label="Codex account"><button id="codex-connect" type="button">Connect Codex</button></sdpi-item>
+			<sdpi-item><small id="codex-auth-status" role="status" aria-live="polite">Checking Codex login…</small></sdpi-item>
+			<sdpi-item><button id="codex-cancel" type="button" hidden>Cancel sign-in</button></sdpi-item>
+		</div>
+		<sdpi-item label="Limit">
+			<sdpi-select setting="window" default="auto">
+				<option value="auto">Automatic (available window)</option>
+				<option value="session">5-hour</option>
+				<option value="weekly">7-day (weekly)</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item><small>One limit per key. Reset countdown: 04:10 or 3d 05:00.</small></sdpi-item>
+
 		<sdpi-item label="Refresh interval (sec)">
 			<sdpi-range setting="refreshIntervalSec" min="60" max="600" step="5" default="120" showlabels></sdpi-range>
 		</sdpi-item>
@@ -23,13 +38,14 @@
 		</sdpi-item>
 
 		<sdpi-item label="Credentials path">
-			<sdpi-textfield setting="customCredentialsPath" placeholder="Default: ~/.codex/auth.json"></sdpi-textfield>
+			<sdpi-textfield setting="customCredentialsPath" placeholder="Leave empty for automatic login renewal"></sdpi-textfield>
 		</sdpi-item>
 
 		<sdpi-item>
 			<small style="color: var(--sdpi-color-muted, #999);">
-				Leave the path empty to use the default Codex credentials location.
+				Leave empty and use Connect Codex. Custom files are read-only and must be renewed by their owner.
 			</small>
 		</sdpi-item>
+		<script src="codex-auth.js"></script>
 	</body>
 </html>

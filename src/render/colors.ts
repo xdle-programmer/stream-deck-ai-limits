@@ -23,30 +23,19 @@ const TRACK = "#3a3a3c";
 
 /** Status → accent (fill) color. */
 const ACCENT: Record<UsageStatus, string> = {
-	ok: "#34c759", // green
+	ok: "green", // green
 	warning: "#ffd60a", // yellow
 	critical: "#ff9f0a", // orange
 	limited: "#ff453a", // red
-	stale: "#636366", // muted gray (data shown but dimmed)
-	auth_required: "#636366", // neutral gray
+	stale: "#2d2d2d", // muted gray (data shown but dimmed)
+	auth_required: "#2d2d2d", // neutral gray
 	rate_limited: "#ff9f0a", // orange (a softer alarm than hard error)
 	error: "#ff453a", // red
 };
 
-const BACKGROUND: Record<UsageStatus, string> = {
-	ok: "#1c1c1e",
-	warning: "#1c1c1e",
-	critical: "#1c1c1e",
-	limited: "#1c1c1e",
-	stale: "#141414", // slightly darker to read as "dimmed"
-	auth_required: "#1c1c1e",
-	rate_limited: "#1c1c1e",
-	error: "#1c1c1e",
-};
-
 export function paletteForStatus(status: UsageStatus): Palette {
 	return {
-		background: BACKGROUND[status],
+		background: "#000000",
 		text: status === "stale" ? TEXT_MUTED : TEXT,
 		textMuted: TEXT_MUTED,
 		track: TRACK,
@@ -54,15 +43,15 @@ export function paletteForStatus(status: UsageStatus): Palette {
 	};
 }
 
-/** Brand colors per provider: a bright accent (frame) and a tinted background fill. */
-export function providerColors(provider: UsageProvider): { accent: string; tint: string } {
+/** Brand accent for the label and optional outline; backgrounds are always black. */
+export function providerColors(provider: UsageProvider): { accent: string } {
 	switch (provider) {
 		case "codex":
-			return { accent: "#10a37f", tint: "#173d34" }; // teal
+			return { accent: "#6983ff" }; // teal
 		case "copilot":
-			return { accent: "#6e7681", tint: "#2a2a2e" }; // GitHub-neutral gray
+			return { accent: "#6e7681" }; // GitHub-neutral gray
 		case "claude":
 		default:
-			return { accent: "#d97757", tint: "#46291f" }; // Claude orange
+			return { accent: "#d97757" }; // Claude orange
 	}
 }

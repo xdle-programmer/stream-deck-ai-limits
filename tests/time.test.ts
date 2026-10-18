@@ -38,28 +38,39 @@ test("formatResetTime: null / invalid → null", () => {
 test("formatCountdown: hours and minutes", () => {
 	const now = new Date("2026-05-31T06:08:00Z");
 	const target = new Date("2026-05-31T14:06:00Z").toISOString();
-	assert.equal(formatCountdown(target, now), "7h 58m");
+	assert.equal(formatCountdown(target, now), "07:58");
 });
 
 test("formatCountdown: under an hour → minutes only", () => {
 	const now = new Date("2026-05-31T06:00:00Z");
 	const target = new Date("2026-05-31T06:42:00Z").toISOString();
-	assert.equal(formatCountdown(target, now), "42m");
+	assert.equal(formatCountdown(target, now), "00:42");
 });
 
-test("formatCountdown: multi-day → days and hours", () => {
+test("formatCountdown: multi-day keeps hours and minutes", () => {
 	const now = new Date("2026-05-31T06:00:00Z");
 	const target = new Date("2026-06-03T10:00:00Z").toISOString();
-	assert.equal(formatCountdown(target, now), "3d 4h");
+	assert.equal(formatCountdown(target, now), "3d 04:00");
 });
 
-test("formatCountdown: past / now → 'now'", () => {
+test("formatCountdown: past / now → '00:00'", () => {
 	const now = new Date("2026-05-31T15:00:00Z");
 	const target = new Date("2026-05-31T14:00:00Z").toISOString();
-	assert.equal(formatCountdown(target, now), "now");
+	assert.equal(formatCountdown(target, now), "00:00");
 });
 
 test("formatCountdown: null / invalid → null", () => {
 	assert.equal(formatCountdown(null), null);
 	assert.equal(formatCountdown("nope"), null);
+	assert.equal(formatCountdown("2026-06-03T10:00:00Z", new Date("invalid")), null);
+});
+
+test("formatCountdown: requested examples, minute precision and day boundaries", () => {
+	const now = new Date("2026-05-31T00:00:00Z");
+	for (const [minutes, expected] of [[250, "04:10"], [3 * 1440 + 5 * 60, "3d 05:00"],
+		[3 * 1440 + 5 * 60 + 7, "3d 05:07"], [1440, "1d 00:00"], [0, "00:00"]] as const) {
+		assert.equal(formatCountdown(new Date(now.getTime() + minutes * 60_000).toISOString(), now), expected);
+	}
+	assert.equal(formatCountdown(new Date(now.getTime() + 1).toISOString(), now), "00:01");
+	assert.equal(formatCountdown(new Date(now.getTime() + 60_001).toISOString(), now), "00:02");
 });

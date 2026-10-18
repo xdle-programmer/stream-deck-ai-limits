@@ -9,22 +9,25 @@ import type { CodexRateLimitWindow, CodexUsageResponse } from "./codex-types.ts"
  * `used_percent` is already a 0..100 percentage (clamped + rounded). `reset_at` is a unix
  * timestamp in **seconds** → converted to an ISO string. Missing values become `null`.
  */
-function normalizeWindow(window: CodexRateLimitWindow | null | undefined): UsageWindow {
+function normalizeWindow(window: CodexRateLimitWindow | null | undefined, now: Date): UsageWindow {
 	const pct = window?.used_percent;
 	const usedPercent =
 		typeof pct === "number" && Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct))) : null;
-	const resetAt =
-		typeof window?.reset_at === "number" && Number.isFinite(window.reset_at)
-			? new Date(window.reset_at * 1000).toISOString()
-			: null;
+	const resetMs = typeof window?.reset_at === "number" && Number.isFinite(window.reset_at)
+		? window.reset_at * 1000
+		: typeof window?.reset_after_seconds === "number" && Number.isFinite(window.reset_after_seconds)
+			? now.getTime() + window.reset_after_seconds * 1000 : null;
+	const resetDate = resetMs !== null ? new Date(resetMs) : null;
+	const resetAt = resetDate && Number.isFinite(resetDate.getTime()) ? resetDate.toISOString() : null;
 	return { usedPercent, resetAt };
 }
 
 /**
  * Normalize a raw Codex usage response into a provider-agnostic {@link UsageSnapshot}.
  *
- * Mapping: `rate_limit.primary_window → session` (5h), `secondary_window → weekly` (7d). The
- * overall status is the worse of the two windows; an incomplete response never throws.
+ * Identify windows by duration: a weekly-only account may put its 7-day window in primary.
+ * Legacy responses without duration retain the old slot mapping. Explicit unknown durations
+ * are never mislabeled as 5-hour or weekly limits.
  */
 export function normalizeCodexUsage(
 	raw: CodexUsageResponse,
@@ -32,8 +35,15 @@ export function normalizeCodexUsage(
 	now: Date = new Date(),
 ): UsageSnapshot {
 	const rateLimit = raw.rate_limit ?? undefined;
-	const session = normalizeWindow(rateLimit?.primary_window);
-	const weekly = normalizeWindow(rateLimit?.secondary_window);
+	const primary = rateLimit?.primary_window;
+	const secondary = rateLimit?.secondary_window;
+	const windows = [primary, secondary];
+	const sessionWindow = windows.find((window) => window?.limit_window_seconds === 18_000)
+		?? (primary?.limit_window_seconds == null ? primary : undefined);
+	const weeklyWindow = windows.find((window) => window?.limit_window_seconds === 604_800)
+		?? (secondary?.limit_window_seconds == null ? secondary : undefined);
+	const session = normalizeWindow(sessionWindow, now);
+	const weekly = normalizeWindow(weeklyWindow, now);
 
 	return {
 		provider: "codex",

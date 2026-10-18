@@ -1,0 +1,8 @@
+#claude-auth[hidden], #codex-auth[hidden], #codex-cancel[hidden] { display: none; }
+#claude-connect, #codex-connect, #codex-cancel {
+	width: 100%; padding: 7px 10px; border: 1px solid #666; border-radius: 3px;
+	background: #414141; color: #eee; font: inherit; cursor: pointer;
+}
+#claude-connect:hover:enabled, #codex-connect:hover:enabled, #codex-cancel:hover:enabled { background: #505050; }
+#claude-connect:disabled, #codex-connect:disabled { opacity: 0.55; cursor: default; }
+#claude-auth-status, #codex-auth-status { color: var(--sdpi-color-muted, #aaa); line-height: 1.4; }

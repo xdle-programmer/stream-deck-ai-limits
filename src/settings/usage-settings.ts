@@ -1,5 +1,4 @@
 import type { StatusThresholds, UsageProvider } from "../providers/types.ts";
-import type { DateFormat } from "../utils/time.ts";
 
 /**
  * Settings persisted per usage key (Claude, Codex, or Copilot), edited via the Property
@@ -13,9 +12,10 @@ export type UsageActionSettings = {
 	warningThreshold?: number;
 	criticalThreshold?: number;
 	customCredentialsPath?: string;
-	// Single-window action only (ignored by the combined Claude/Codex/Copilot actions):
+	// Provider is selected only by the universal action. Every key selects one window.
 	provider?: string;
 	window?: string;
+	// Legacy settings are accepted, but the reset display is always a compact countdown.
 	resetDisplay?: string;
 	dateFormat?: string;
 	providerAccent?: string;
@@ -95,21 +95,15 @@ export function sameResolvedSettings(a: ResolvedUsageSettings, b: ResolvedUsageS
 // --- Single-window action settings ----------------------------------------
 
 /** Which window the single-window key shows. `fable` is the model-scoped weekly window (Claude only). */
-export type WindowKind = "session" | "weekly" | "fable";
-/** What reset info to show under the percentage. */
-export type ResetDisplay = "datetime" | "countdown" | "both" | "none";
-/** How to tint the key with the provider's brand color. */
-export type ProviderAccent = "frame" | "tint" | "none";
+export type WindowKind = "auto" | "session" | "weekly" | "fable";
+/** Legacy setting, accepted for saved keys. All keys now have no border. */
+export type ProviderAccent = "frame" | "none";
 
 export interface ResolvedSingleWindowSettings {
 	provider: UsageProvider;
 	window: WindowKind;
-	resetDisplay: ResetDisplay;
-	dateFormat: DateFormat;
 	providerAccent: ProviderAccent;
 }
-
-const DATE_FORMATS: DateFormat[] = ["day-month", "iso-short", "weekday"];
 
 function pickEnum<T extends string>(value: string | undefined, allowed: readonly T[], fallback: T): T {
 	return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
@@ -118,7 +112,7 @@ function pickEnum<T extends string>(value: string | undefined, allowed: readonly
 /** Validate the single-window display settings, falling back to sensible defaults. */
 export function resolveSingleWindowSettings(settings: UsageActionSettings = {}): ResolvedSingleWindowSettings {
 	const provider = pickEnum<UsageProvider>(settings.provider, ["claude", "codex", "copilot"], "claude");
-	let window = pickEnum<WindowKind>(settings.window, ["session", "weekly", "fable"], "session");
+	let window = pickEnum<WindowKind>(settings.window, ["auto", "session", "weekly", "fable"], "auto");
 	if (provider === "copilot") {
 		// Copilot has no weekly quota — its session window IS the monthly premium usage.
 		window = "session";
@@ -129,9 +123,7 @@ export function resolveSingleWindowSettings(settings: UsageActionSettings = {}):
 	return {
 		provider,
 		window,
-		resetDisplay: pickEnum<ResetDisplay>(settings.resetDisplay, ["datetime", "countdown", "both", "none"], "datetime"),
-		dateFormat: pickEnum<DateFormat>(settings.dateFormat, DATE_FORMATS, "day-month"),
-		providerAccent: pickEnum<ProviderAccent>(settings.providerAccent, ["frame", "tint", "none"], "frame"),
+		providerAccent: "none",
 	};
 }
 
@@ -139,8 +131,6 @@ export function sameSingleWindowSettings(a: ResolvedSingleWindowSettings, b: Res
 	return (
 		a.provider === b.provider &&
 		a.window === b.window &&
-		a.resetDisplay === b.resetDisplay &&
-		a.dateFormat === b.dateFormat &&
 		a.providerAccent === b.providerAccent
 	);
 }

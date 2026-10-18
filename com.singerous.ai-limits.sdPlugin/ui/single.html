@@ -3,6 +3,7 @@
 	<head lang="en">
 		<meta charset="utf-8" />
 		<title>Usage (single window) Settings</title>
+		<link rel="stylesheet" href="claude-auth.css" />
 		<script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
 	</head>
 	<body>
@@ -18,38 +19,26 @@
 			</sdpi-select>
 		</sdpi-item>
 
-		<sdpi-item label="Window">
-			<sdpi-select setting="window" default="session">
+		<div id="claude-auth">
+			<sdpi-item label="Claude account"><button id="claude-connect" type="button">Connect Claude</button></sdpi-item>
+			<sdpi-item><small id="claude-auth-status" role="status" aria-live="polite">Checking Claude login…</small></sdpi-item>
+		</div>
+		<div id="codex-auth" hidden>
+			<sdpi-item label="Codex account"><button id="codex-connect" type="button">Connect Codex</button></sdpi-item>
+			<sdpi-item><small id="codex-auth-status" role="status" aria-live="polite">Checking Codex login…</small></sdpi-item>
+			<sdpi-item><button id="codex-cancel" type="button" hidden>Cancel sign-in</button></sdpi-item>
+		</div>
+
+		<sdpi-item label="Limit">
+			<sdpi-select setting="window" default="auto">
+				<option value="auto">Automatic (available window)</option>
 				<option value="session">5-hour</option>
 				<option value="weekly">7-day (weekly)</option>
 				<option value="fable">Fable 7-day (Claude only)</option>
 			</sdpi-select>
 		</sdpi-item>
 
-		<sdpi-item label="Reset info">
-			<sdpi-select setting="resetDisplay" default="datetime">
-				<option value="datetime">Date & time</option>
-				<option value="countdown">Countdown</option>
-				<option value="both">Both</option>
-				<option value="none">Hidden</option>
-			</sdpi-select>
-		</sdpi-item>
-
-		<sdpi-item label="Date format">
-			<sdpi-select setting="dateFormat" default="day-month">
-				<option value="day-month">31 May, 14:06</option>
-				<option value="iso-short">05/31 14:06</option>
-				<option value="weekday">Sat 14:06</option>
-			</sdpi-select>
-		</sdpi-item>
-
-		<sdpi-item label="Provider accent">
-			<sdpi-select setting="providerAccent" default="frame">
-				<option value="frame">Colored frame</option>
-				<option value="tint">Tinted background</option>
-				<option value="none">None</option>
-			</sdpi-select>
-		</sdpi-item>
+		<sdpi-item><small>One limit per key. Reset countdown: 04:10 or 3d 05:00. Copilot always shows monthly usage.</small></sdpi-item>
 
 		<sdpi-item label="Refresh interval (sec)">
 			<sdpi-range setting="refreshIntervalSec" min="60" max="600" step="5" default="120" showlabels></sdpi-range>
@@ -66,5 +55,7 @@
 		<sdpi-item label="Credentials path">
 			<sdpi-textfield setting="customCredentialsPath" placeholder="Default per provider"></sdpi-textfield>
 		</sdpi-item>
+		<script src="claude-auth.js"></script>
+		<script src="codex-auth.js"></script>
 	</body>
 </html>

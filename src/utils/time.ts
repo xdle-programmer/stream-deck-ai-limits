@@ -44,10 +44,8 @@ export function formatResetTime(isoString: string | null, format: DateFormat = "
 }
 
 /**
- * Format the time remaining until reset as a short countdown.
- *  - ≥ 1h → `7h 58m`
- *  - < 1h → `42m`
- *  - past/0 → `now`
+ * Minute-precision reset countdown: `04:10` or `3d 05:00`.
+ * Round positive partial minutes up, so `00:00` means the reset has actually arrived.
  * Returns `null` for a missing/invalid timestamp.
  */
 export function formatCountdown(isoString: string | null, now: Date = new Date()): string | null {
@@ -55,23 +53,17 @@ export function formatCountdown(isoString: string | null, now: Date = new Date()
 		return null;
 	}
 	const target = new Date(isoString);
-	if (Number.isNaN(target.getTime())) {
+	if (!Number.isFinite(target.getTime()) || !Number.isFinite(now.getTime())) {
 		return null;
 	}
 	const diffMs = target.getTime() - now.getTime();
 	if (diffMs <= 0) {
-		return "now";
+		return "00:00";
 	}
-	const totalMinutes = Math.floor(diffMs / 60_000);
+	const totalMinutes = Math.ceil(diffMs / 60_000);
 	const days = Math.floor(totalMinutes / (60 * 24));
 	const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
 	const minutes = totalMinutes % 60;
 
-	if (days > 0) {
-		return `${days}d ${hours}h`;
-	}
-	if (hours > 0) {
-		return `${hours}h ${minutes}m`;
-	}
-	return `${minutes}m`;
+	return `${days > 0 ? `${days}d ` : ""}${pad2(hours)}:${pad2(minutes)}`;
 }

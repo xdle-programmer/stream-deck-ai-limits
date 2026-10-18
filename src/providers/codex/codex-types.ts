@@ -18,9 +18,9 @@ export interface CodexRateLimitWindow {
 export interface CodexRateLimit {
 	allowed?: boolean | null;
 	limit_reached?: boolean | null;
-	/** 5-hour window. */
+	/** First returned window; identify its period using limit_window_seconds. */
 	primary_window?: CodexRateLimitWindow | null;
-	/** 7-day window. */
+	/** Optional second window; absent on some weekly-only accounts. */
 	secondary_window?: CodexRateLimitWindow | null;
 }
 

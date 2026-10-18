@@ -6,6 +6,7 @@ import { DEFAULT_THRESHOLDS } from "../types.ts";
 import { fetchCodexUsage } from "./codex-api-client.ts";
 import { readCodexCredentials, type CodexCredentials } from "./codex-credentials.ts";
 import { normalizeCodexUsage } from "./codex-normalizer.ts";
+import { managedCodexSession, type CodexUsageSession } from "./codex-session.ts";
 
 /** Injectable dependencies — real implementations by default, overridable in tests. */
 export interface CodexProviderDeps {
@@ -26,15 +27,12 @@ export interface CodexProviderOptions {
 	customCredentialsPath?: string;
 	logger?: SafeLogger;
 	deps?: Partial<CodexProviderDeps>;
+	session?: CodexUsageSession;
 }
 
 /**
- * Codex provider: credentials → fetch → normalize, behind the shared {@link UsageCache}. Always
- * resolves to a {@link UsageSnapshot}.
- *
- * Note: unlike Claude, Codex token refresh is not yet implemented (Phase 15 follow-up). A 401 is
- * surfaced as `auth_required` — the Codex CLI keeps `~/.codex/auth.json` fresh, so re-running it
- * restores access.
+ * Default: official Codex app-server owns login, token renewal and limits. An explicit custom
+ * credentials file keeps the legacy, read-only HTTP path without modifying its owner's login.
  */
 export class CodexProvider implements Provider {
 	private readonly cache: UsageCache;
@@ -42,6 +40,7 @@ export class CodexProvider implements Provider {
 	private readonly customCredentialsPath?: string;
 	private readonly log: SafeLogger;
 	private readonly deps: CodexProviderDeps;
+	private readonly session?: CodexUsageSession;
 
 	constructor(options: CodexProviderOptions) {
 		this.cache = options.cache;
@@ -49,15 +48,23 @@ export class CodexProvider implements Provider {
 		this.customCredentialsPath = options.customCredentialsPath;
 		this.log = options.logger ?? noopLogger;
 		this.deps = { ...defaultDeps, ...options.deps };
+		this.session = options.session ?? (options.customCredentialsPath ? undefined : managedCodexSession);
 	}
 
 	async getUsage(options: GetUsageOptions = {}): Promise<UsageSnapshot> {
+		if (this.session) this.cache.useAccountGeneration(this.session.generation);
 		const snapshot = await this.cache.get(() => this.runPipeline(), { force: options.force });
 		this.log.info(`codex usage: status=${snapshot.status} stale=${snapshot.stale}`);
 		return snapshot;
 	}
 
 	private async runPipeline(): Promise<UsageSnapshot> {
+		if (this.session) {
+			const generation = this.session.generation;
+			const raw = await this.session.getUsage();
+			if (generation !== this.session.generation) throw authRequired("Codex login changed. Refresh the key.");
+			return normalizeCodexUsage(raw, this.thresholds, new Date(this.deps.now()));
+		}
 		const creds = await this.deps.readCredentials(this.customCredentialsPath);
 
 		let raw;
@@ -65,8 +72,7 @@ export class CodexProvider implements Provider {
 			raw = await this.deps.fetchUsage(creds.accessToken, creds.accountId);
 		} catch (err) {
 			if (err instanceof UnauthorizedError) {
-				// No Codex refresh yet → tell the user to re-auth with the Codex CLI.
-				throw authRequired("Codex session expired. Log in with the Codex CLI again.");
+				throw authRequired("Custom Codex credentials expired. Renew them with their owner, or clear Credentials path and use Connect Codex.");
 			}
 			throw err;
 		}

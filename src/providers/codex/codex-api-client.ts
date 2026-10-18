@@ -1,4 +1,4 @@
-import { authRequired, genericError, rateLimited, UnauthorizedError } from "../../utils/errors.ts";
+import { genericError, rateLimited, UnauthorizedError } from "../../utils/errors.ts";
 import { parseRetryAfterMs } from "../../utils/http.ts";
 import type { CodexUsageResponse } from "./codex-types.ts";
 
@@ -8,8 +8,8 @@ const USAGE_ENDPOINT = "https://chatgpt.com/backend-api/codex/usage";
 const REQUEST_TIMEOUT_MS = 8_000;
 
 /**
- * Headers the Codex CLI sends. The `User-Agent: codex_cli_rs` is **mandatory** — without a
- * CLI-like UA the backend returns 403 with an HTML body (confirmed in Phase 9).
+ * Legacy HTTP path for explicitly selected credentials files. A CLI-style user agent alone
+ * does not guarantee access: the edge can challenge Node's HTTP client with an HTML 403.
  */
 function usageHeaders(accessToken: string, accountId: string | null): Headers {
 	// IMPORTANT: build a `Headers` instance and use `.set()`. On Stream Deck's Node 24 runtime,
@@ -29,9 +29,8 @@ function usageHeaders(accessToken: string, accountId: string | null): Headers {
 /**
  * Fetch the raw Codex usage response.
  *
- * @throws {UnauthorizedError} on HTTP 401 (caller may refresh + retry — Codex refresh is a
- *   Phase 15 follow-up; for now this surfaces as auth_required).
- * @throws {UsageError} `auth_required` on 403, `rate_limited` on 429, `error` otherwise.
+ * @throws {UnauthorizedError} on HTTP 401 (custom credentials are read-only).
+ * @throws {UsageError} `rate_limited` on 429, `error` on 403 or other failures.
  *
  * Never logs the access token or the Authorization header.
  */
@@ -57,7 +56,9 @@ export async function fetchCodexUsage(accessToken: string, accountId: string | n
 		throw new UnauthorizedError();
 	}
 	if (response.status === 403) {
-		throw authRequired("Codex usage request was forbidden. Log in with the Codex CLI again.");
+		throw genericError(response.headers.get("cf-mitigated") === "challenge"
+			? "Codex's edge protection blocked this HTTP client. Clear Credentials path and use Connect Codex."
+			: "Codex denied this request (HTTP 403). Check account/workspace access, or clear Credentials path and use Connect Codex.");
 	}
 	if (response.status === 429) {
 		throw rateLimited("Codex usage rate limit reached.", parseRetryAfterMs(response.headers.get("retry-after")));

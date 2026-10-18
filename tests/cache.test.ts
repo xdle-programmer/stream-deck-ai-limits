@@ -28,6 +28,30 @@ function clock(start = 1_000_000) {
 	return { now: () => t, advance: (ms: number) => (t += ms) };
 }
 
+test("account change discards old in-flight data and keeps the new account cache", async () => {
+	const cache = new UsageCache({ provider: "claude" });
+	cache.useAccountGeneration(0);
+	let finish!: (snapshot: UsageSnapshot) => void;
+	const old = cache.get(() => new Promise((resolve) => { finish = resolve; }));
+	cache.useAccountGeneration(1);
+	const current = await cache.get(async () => okSnapshot(12));
+	finish(okSnapshot(98));
+	assert.equal((await old).status, "auth_required");
+	assert.equal(current.session.usedPercent, 12);
+	assert.equal(cache.lastSnapshot?.session.usedPercent, 12);
+	// Other keys observing the same account change must not clear the shared cache again.
+	cache.useAccountGeneration(1);
+	assert.equal((await cache.get(async () => { throw Error("must stay cached"); })).session.usedPercent, 12);
+});
+
+test("account change clears rate-limit backoff belonging to the previous login", async () => {
+	const cache = new UsageCache({ provider: "claude" });
+	cache.useAccountGeneration(0);
+	await cache.get(async () => { throw rateLimited("old account throttled"); });
+	cache.useAccountGeneration(1);
+	assert.equal((await cache.get(async () => okSnapshot(7), { force: true })).session.usedPercent, 7);
+});
+
 test("first get triggers a fetch and stores the snapshot", async () => {
 	const cache = new UsageCache({ provider: "claude" });
 	let calls = 0;

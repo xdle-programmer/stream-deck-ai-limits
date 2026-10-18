@@ -3,13 +3,30 @@
 	<head lang="en">
 		<meta charset="utf-8" />
 		<title>Claude Usage Settings</title>
+		<link rel="stylesheet" href="claude-auth.css" />
 		<script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
 	</head>
 	<body>
+		<div id="claude-auth">
+			<sdpi-item label="Claude account">
+				<button id="claude-connect" type="button">Connect Claude</button>
+			</sdpi-item>
+			<sdpi-item><small id="claude-auth-status" role="status" aria-live="polite">Checking Claude login…</small></sdpi-item>
+		</div>
 		<!--
 			Settings auto-persist to the action via the `setting` attribute and apply live in the
 			plugin (onDidReceiveSettings). Components: https://sdpi-components.dev/docs/components
 		-->
+		<sdpi-item label="Limit">
+			<sdpi-select setting="window" default="auto">
+				<option value="auto">Automatic (available window)</option>
+				<option value="session">5-hour</option>
+				<option value="weekly">7-day (weekly)</option>
+				<option value="fable">Fable 7-day</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item><small>One limit per key. Reset countdown: 04:10 or 3d 05:00.</small></sdpi-item>
+
 		<sdpi-item label="Refresh interval (sec)">
 			<sdpi-range setting="refreshIntervalSec" min="60" max="600" step="5" default="120" showlabels></sdpi-range>
 		</sdpi-item>
@@ -25,14 +42,16 @@
 		<sdpi-item label="Credentials path">
 			<sdpi-textfield
 				setting="customCredentialsPath"
-				placeholder="Default: ~/.claude/.credentials.json"
+				placeholder="Empty: separate plugin login"
 			></sdpi-textfield>
 		</sdpi-item>
 
 		<sdpi-item>
 			<small style="color: var(--sdpi-color-muted, #999);">
-				Leave the path empty to use the default Claude Code credentials location.
+				Connect Claude once above. Leave the path empty for automatic renewal.
+				An explicit credentials file is read-only and must be renewed by its owner.
 			</small>
 		</sdpi-item>
+		<script src="claude-auth.js"></script>
 	</body>
 </html>

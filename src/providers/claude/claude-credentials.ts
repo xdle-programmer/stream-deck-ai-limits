@@ -15,6 +15,8 @@ export interface ClaudeCredentials {
 	refreshToken: string | null;
 	/** Expiry as epoch milliseconds, or `null` when the file omits it. */
 	expiresAt: number | null;
+	refreshTokenExpiresAt?: number | null;
+	clientId?: string;
 }
 
 /** Raw shape of the relevant slice of `.credentials.json`. */
@@ -23,6 +25,8 @@ interface RawCredentialsFile {
 		accessToken?: unknown;
 		refreshToken?: unknown;
 		expiresAt?: unknown;
+		refreshTokenExpiresAt?: unknown;
+		clientId?: unknown;
 	};
 }
 
@@ -130,6 +134,8 @@ export async function readClaudeCredentials(
 		accessToken,
 		refreshToken: typeof oauth?.refreshToken === "string" ? oauth.refreshToken : null,
 		expiresAt: typeof oauth?.expiresAt === "number" ? oauth.expiresAt : null,
+		refreshTokenExpiresAt: typeof oauth?.refreshTokenExpiresAt === "number" ? oauth.refreshTokenExpiresAt : null,
+		clientId: typeof oauth?.clientId === "string" ? oauth.clientId : undefined,
 	};
 }
 

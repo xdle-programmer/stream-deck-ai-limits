@@ -93,6 +93,40 @@ test("missing rate_limit → null windows, ok status, no throw", () => {
 	assert.equal(snap.status, "ok");
 });
 
+test("weekly-only Codex window in primary is never treated as a 5-hour limit", () => {
+	const snap = normalizeCodexUsage({ plan_type: "pro", rate_limit: {
+		primary_window: { used_percent: 62, limit_window_seconds: 604800, reset_at: 1780218629 },
+	} });
+	assert.equal(snap.session.usedPercent, null);
+	assert.equal(snap.weekly.usedPercent, 62);
+	assert.equal(snap.weekly.resetAt, new Date(1780218629 * 1000).toISOString());
+});
+
+test("Codex windows are mapped by duration even when returned in reverse order", () => {
+	const snap = normalizeCodexUsage({ rate_limit: {
+		primary_window: { used_percent: 62, limit_window_seconds: 604800 },
+		secondary_window: { used_percent: 14, limit_window_seconds: 18000 },
+	} });
+	assert.equal(snap.session.usedPercent, 14); assert.equal(snap.weekly.usedPercent, 62);
+});
+
+test("unsupported Codex periods are not mislabeled; duration-less legacy responses remain readable", () => {
+	const unknown = normalizeCodexUsage({ rate_limit: { primary_window: { used_percent: 20, limit_window_seconds: 900 } } });
+	assert.equal(unknown.session.usedPercent, null); assert.equal(unknown.weekly.usedPercent, null);
+	const legacy = normalizeCodexUsage({ rate_limit: { primary_window: { used_percent: 20 }, secondary_window: { used_percent: 30 } } });
+	assert.equal(legacy.session.usedPercent, 20); assert.equal(legacy.weekly.usedPercent, 30);
+});
+
+test("relative Codex reset times become absolute countdown targets; invalid dates never throw", () => {
+	const now = new Date("2026-05-31T00:00:00Z");
+	const snap = normalizeCodexUsage({ rate_limit: { primary_window: {
+		used_percent: 20, limit_window_seconds: 604800, reset_after_seconds: 3 * 86400 + 5 * 3600,
+	} } }, undefined, now);
+	assert.equal(snap.weekly.resetAt, "2026-06-03T05:00:00.000Z");
+	const invalid = normalizeCodexUsage({ rate_limit: { primary_window: { used_percent: 20, reset_at: 1e100 } } });
+	assert.equal(invalid.session.resetAt, null);
+});
+
 // --- api client (mock fetch) ----------------------------------------------
 
 async function withFetch(impl: () => Response, run: (calls: { url: string; init: RequestInit }[]) => Promise<void>) {
@@ -123,12 +157,15 @@ test("api client sends user-agent codex_cli_rs + account-id via a Headers object
 	});
 });
 
-test("api client status mapping: 401→Unauthorized, 403→auth, 429→rate", async () => {
+test("api client status mapping: 401→Unauthorized, 403→error without demanding login, 429→rate", async () => {
 	await withFetch(() => new Response("", { status: 401 }), async () => {
 		await assert.rejects(() => fetchCodexUsage("T", null), (e: unknown) => e instanceof UnauthorizedError);
 	});
 	await withFetch(() => new Response("<html>", { status: 403 }), async () => {
-		await assert.rejects(() => fetchCodexUsage("T", null), (e: unknown) => isUsageError(e) && e.status === "auth_required");
+		await assert.rejects(() => fetchCodexUsage("T", null), (e: unknown) => isUsageError(e) && e.status === "error");
+	});
+	await withFetch(() => new Response("<html>", { status: 403, headers: { "cf-mitigated": "challenge" } }), async () => {
+		await assert.rejects(() => fetchCodexUsage("T", null), (e: unknown) => isUsageError(e) && e.status === "error" && e.message.includes("Connect Codex"));
 	});
 	await withFetch(() => new Response("", { status: 429 }), async () => {
 		await assert.rejects(() => fetchCodexUsage("T", null), (e: unknown) => isUsageError(e) && e.status === "rate_limited");
@@ -138,7 +175,7 @@ test("api client status mapping: 401→Unauthorized, 403→auth, 429→rate", as
 // --- provider --------------------------------------------------------------
 
 function makeProvider(deps: Partial<CodexProviderDeps>): CodexProvider {
-	return new CodexProvider({ cache: new UsageCache({ provider: "codex" }), deps });
+	return new CodexProvider({ cache: new UsageCache({ provider: "codex" }), customCredentialsPath: "/mock/auth.json", deps });
 }
 
 test("provider happy path → codex snapshot", async () => {
@@ -155,7 +192,7 @@ test("provider happy path → codex snapshot", async () => {
 	assert.equal(snap.session.usedPercent, 35);
 });
 
-test("provider: 401 → auth_required snapshot (no Codex refresh yet, no throw)", async () => {
+test("custom provider: 401 → auth_required snapshot without modifying credentials", async () => {
 	const provider = makeProvider({
 		readCredentials: async () => ({ accessToken: "T", accountId: "a", expiresAt: null }),
 		fetchUsage: async () => {
